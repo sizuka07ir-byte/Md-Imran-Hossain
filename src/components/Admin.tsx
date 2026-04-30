@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, DollarSign, Activity, Settings, Search, Check, X, MoreVertical, TrendingUp, UserMinus, ShieldAlert, MessageCircle, Send, Trash2, Zap, Cpu, HardDrive, Power } from 'lucide-react';
+import { Users, DollarSign, Activity, Settings, Search, Check, X, MoreVertical, TrendingUp, UserMinus, ShieldAlert, MessageCircle, Send, Trash2, Zap, Cpu, HardDrive, Power, Copy } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { cn } from '../lib/utils';
 import { type User, type Transaction, type SupportMessage, DUMMY_USER, MINING_PLANS } from '../constants';
@@ -8,7 +8,12 @@ import { Line } from 'react-chartjs-2';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
-export const Admin = () => {
+interface AdminProps {
+  currentUser: User;
+  onUpdateUser: (user: User) => void;
+}
+
+export const Admin = ({ currentUser, onUpdateUser }: AdminProps) => {
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'users' | 'transactions' | 'stats' | 'support' | 'system'>('users');
@@ -16,7 +21,15 @@ export const Admin = () => {
   const [supportMessages, setSupportMessages] = useState<SupportMessage[]>([]);
   const [selectedUserChat, setSelectedUserChat] = useState<string | null>(null);
   const [replyInput, setReplyInput] = useState('');
+  const [adjustEmail, setAdjustEmail] = useState('');
+  const [adjustAmount, setAdjustAmount] = useState('');
+  const [adjustType, setAdjustType] = useState<'add' | 'subtract'>('add');
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    alert("Copied to clipboard!");
+  };
 
   useEffect(() => {
     const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
@@ -202,6 +215,114 @@ export const Admin = () => {
     }
   };
 
+  const handleAdjustBalance = () => {
+    if (!adjustEmail || !adjustAmount) {
+      alert("Please enter both email and amount.");
+      return;
+    }
+    const amount = parseFloat(adjustAmount);
+    if (isNaN(amount) || amount <= 0) {
+      alert("Please enter a valid positive amount.");
+      return;
+    }
+
+    const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
+    const userToAdjust = savedUsers.find((u: User) => u.email === adjustEmail) || (adjustEmail === DUMMY_USER.email ? DUMMY_USER : null);
+
+    if (!userToAdjust) {
+      alert("User not found! Please check the email/ID.");
+      return;
+    }
+
+    const updatedUsers = savedUsers.map((u: User) => {
+      if (u.email === adjustEmail) {
+        const currentBalance = u.balance || 0;
+        const newBalance = adjustType === 'add' ? currentBalance + amount : currentBalance - amount;
+        return { ...u, balance: Math.max(0, newBalance) };
+      }
+      return u;
+    });
+
+    // Special case for DUMMY_USER if it's not in localStorage yet but we're editing it
+    if (adjustEmail === DUMMY_USER.email && !savedUsers.find((u: User) => u.email === DUMMY_USER.email)) {
+      const currentBalance = DUMMY_USER.balance || 0;
+      const newBalance = adjustType === 'add' ? currentBalance + amount : currentBalance - amount;
+      updatedUsers.push({ ...DUMMY_USER, balance: Math.max(0, newBalance) });
+    }
+
+    localStorage.setItem('lumix_users', JSON.stringify(updatedUsers));
+    
+    // Update local UI state
+    setUsers(prev => prev.map(u => {
+      if (u.email === adjustEmail) {
+        const currentBalance = u.balance || 0;
+        const newBalance = adjustType === 'add' ? currentBalance + amount : currentBalance - amount;
+        return { ...u, balance: Math.max(0, newBalance) };
+      }
+      return u;
+    }));
+
+    // Update current user if affected
+    const currentUserStr = localStorage.getItem('lumix_current_user');
+    if (currentUserStr) {
+      const currentUser = JSON.parse(currentUserStr);
+      if (currentUser.email === adjustEmail) {
+        const currentBalance = currentUser.balance || 0;
+        const newBalance = adjustType === 'add' ? currentBalance + amount : currentBalance - amount;
+        localStorage.setItem('lumix_current_user', JSON.stringify({ ...currentUser, balance: Math.max(0, newBalance) }));
+      }
+    }
+
+    alert(`Successfully ${adjustType === 'add' ? 'added' : 'subtracted'} $${amount} ${adjustType === 'add' ? 'to' : 'from'} ${adjustEmail}`);
+    setAdjustAmount('');
+  };
+
+  const toggleUserMining = (email: string) => {
+    const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
+    const userToStop = savedUsers.find((u: User) => u.email === email);
+    
+    if (!userToStop || (userToStop.activeNodes || []).length === 0) {
+      alert("This user has no active mining nodes.");
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to stop all mining for ${email}? They will receive their capital + 3% commission.`)) {
+      return;
+    }
+
+    const updatedUsers = savedUsers.map((u: User) => {
+      if (u.email === email) {
+        const investment = Number(u.miningBalance || 0);
+        const commission = investment * 0.03;
+        return {
+          ...u,
+          balance: Number(u.balance || 0) + investment,
+          profit: Number(u.profit || 0) + commission,
+          miningBalance: 0,
+          activeNodes: []
+        };
+      }
+      return u;
+    });
+
+    localStorage.setItem('lumix_users', JSON.stringify(updatedUsers));
+    const changedUser = updatedUsers.find((u: User) => u.email === email);
+    
+    setUsers(prev => prev.map(u => {
+      if (u.email === email && changedUser) {
+        return changedUser;
+      }
+      return u;
+    }));
+
+    // Update current user if affected
+    if (currentUser.email === email && changedUser) {
+      onUpdateUser(changedUser);
+    }
+
+    alert(`Successfully terminated mining session for ${email}. $${(userToStop.miningBalance * 0.03).toFixed(2)} commission awarded.`);
+  };
+
   const filteredUsers = users.filter(u => 
     u.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     u.email.toLowerCase().includes(searchTerm.toLowerCase())
@@ -213,21 +334,29 @@ export const Admin = () => {
       return;
     }
 
-    if (!window.confirm(`DANGER: You are about to SHUT DOWN all active "${planId}" nodes globally. All affected users will receive their balance back PLUS a 3% bonus. Proceed?`)) {
+    const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
+    const affectedCount = savedUsers.filter((u: User) => (u.activeNodes || []).includes(planId)).length;
+
+    if (affectedCount === 0) {
+      alert(`No active "${planId}" nodes found.`);
       return;
     }
 
-    const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
-    let affectedCount = 0;
+    if (!window.confirm(`DANGER: You are about to SHUT DOWN ${affectedCount} active "${planId}" nodes globally. All ${affectedCount} affected users will receive their balance back PLUS a 3% bonus commission. Proceed?`)) {
+      return;
+    }
+
+    let actualAffectedCount = 0;
     
     const updatedUsers = savedUsers.map((u: User) => {
       if ((u.activeNodes || []).includes(planId)) {
-        affectedCount++;
+        actualAffectedCount++;
         const investment = Number(u.miningBalance || 0);
-        const bonus = investment * 0.03;
+        const commission = (investment * 3) / 100;
         return {
           ...u,
-          balance: Number(u.balance || 0) + investment + bonus,
+          balance: Number(u.balance || 0) + investment,
+          profit: Number(u.profit || 0) + commission,
           miningBalance: 0,
           activeNodes: (u.activeNodes || []).filter(id => id !== planId)
         };
@@ -239,13 +368,12 @@ export const Admin = () => {
     setUsers(updatedUsers); // Update local state
     
     // Update admin if they were affected
-    const currentUser = JSON.parse(localStorage.getItem('lumix_current_user') || '{}');
     const updatedMe = updatedUsers.find((u: User) => u.email === currentUser.email);
     if (updatedMe) {
-      localStorage.setItem('lumix_current_user', JSON.stringify(updatedMe));
+      onUpdateUser(updatedMe);
     }
 
-    alert(`SUCCESS: Global shutdown complete. ${affectedCount} users were affected and compensated.`);
+    alert(`SUCCESS: Global shutdown complete. ${actualAffectedCount} users were affected and compensated with 3% bonus commission.`);
   };
 
   const getMiningStats = (planId: string) => {
@@ -304,6 +432,42 @@ export const Admin = () => {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-4"
         >
+          <div className="glass-card border border-white/5 p-6 rounded-[2rem] bg-primary/5">
+            <h3 className="text-xs font-black uppercase tracking-widest text-primary mb-4 flex items-center gap-2">
+              <DollarSign size={16} /> Quick Balance Adjustment
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <input 
+                type="text" 
+                placeholder="User Email ID"
+                value={adjustEmail}
+                onChange={(e) => setAdjustEmail(e.target.value)}
+                className="col-span-1 md:col-span-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs focus:border-primary/50 text-white"
+              />
+              <input 
+                type="number" 
+                placeholder="Amount ($)"
+                value={adjustAmount}
+                onChange={(e) => setAdjustAmount(e.target.value)}
+                className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs focus:border-primary/50 text-white"
+              />
+              <select 
+                value={adjustType}
+                onChange={(e) => setAdjustType(e.target.value as any)}
+                className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs focus:border-primary/50 text-white"
+              >
+                <option value="add">Add (+)</option>
+                <option value="subtract">Subtract (-)</option>
+              </select>
+              <button 
+                onClick={handleAdjustBalance}
+                className="bg-primary text-black font-black uppercase text-[10px] py-2 rounded-xl hover:bg-opacity-90 transition-all shadow-[0_0_15px_rgba(0,200,83,0.3)]"
+              >
+                Apply Change
+              </button>
+            </div>
+          </div>
+
           <div className="relative">
             <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
             <input 
@@ -319,8 +483,12 @@ export const Admin = () => {
             {filteredUsers.map((user, i) => (
               <div key={user.email} className="glass-card border border-white/5 p-4 rounded-3xl flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center border border-white/10">
-                    <span className="text-gray-400 font-black">{user.name[0]}</span>
+                  <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center border border-white/10 overflow-hidden">
+                    {user.avatar ? (
+                      <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-gray-400 font-black">{user.name[0]}</span>
+                    )}
                   </div>
                   <div>
                     <h4 className="font-bold text-sm">{user.name}</h4>
@@ -328,6 +496,11 @@ export const Admin = () => {
                     <div className="flex gap-2 mt-1">
                       {user.isAdmin && <span className="text-[8px] bg-red-500/10 text-red-500 px-1.5 py-0.5 rounded-md font-black uppercase border border-red-500/20">Admin</span>}
                       {user.isBanned && <span className="text-[8px] bg-gray-500/10 text-gray-400 px-1.5 py-0.5 rounded-md font-black uppercase border border-gray-500/20">Banned</span>}
+                      {(user.activeNodes || []).length > 0 && (
+                        <span className="text-[8px] bg-primary/20 text-primary px-1.5 py-0.5 rounded-md font-black uppercase border border-primary/30 flex items-center gap-1">
+                          <Zap size={8} className="animate-pulse" /> Mining
+                        </span>
+                      )}
                       <span className="text-[8px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-md font-black uppercase border border-primary/20">Ref: {user.referralCode}</span>
                     </div>
                   </div>
@@ -335,8 +508,25 @@ export const Admin = () => {
                 <div className="text-right flex flex-col items-end gap-1">
                   <p className="text-sm font-black text-white">${(user.balance ?? 0).toLocaleString()}</p>
                   <div className="flex gap-1">
-                    <button className="p-2 bg-white/5 hover:bg-white/10 rounded-xl text-gray-400 transition-colors">
-                      <Settings size={14} />
+                    {(user.activeNodes || []).length > 0 && (
+                      <button 
+                        onClick={() => toggleUserMining(user.email)}
+                        className="p-2 bg-orange-500/10 hover:bg-orange-500/20 rounded-xl text-orange-500 transition-colors"
+                        title="Stop Mining & Pay Commission"
+                      >
+                        <Power size={14} />
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => {
+                        setAdjustEmail(user.email);
+                        setActiveTab('users');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="p-2 bg-white/5 hover:bg-white/10 rounded-xl text-primary transition-colors"
+                      title="Adjust Balance"
+                    >
+                      <DollarSign size={14} />
                     </button>
                     {!user.isAdmin && (
                       <div className="flex gap-1">
@@ -426,7 +616,9 @@ export const Admin = () => {
                     )}>
                       {req.type === 'Deposit' ? <DollarSign size={14} /> : <TrendingUp size={14} />}
                     </div>
-                    <span className="text-xs font-bold uppercase tracking-wider">{req.type} Request</span>
+                    <span className="text-xs font-bold uppercase tracking-wider">
+                      {req.type === 'Withdrawal' ? 'Profit Withdrawal' : req.type} Request
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] text-gray-500 font-mono">ID: {req.id}</span>
@@ -440,9 +632,28 @@ export const Admin = () => {
                   </div>
                 </div>
                 <div className="flex items-center justify-between px-2">
-                  <div>
-                    <p className="text-[10px] text-gray-500 font-bold uppercase">{req.user}</p>
-                    <p className="text-lg font-black text-white">${req.amount.toLocaleString()}</p>
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-gray-500 font-bold uppercase">{req.user} ({req.userEmail})</p>
+                    <div className="flex items-baseline gap-2">
+                      <p className="text-lg font-black text-white">${req.amount.toLocaleString()}</p>
+                      {req.type === 'Withdrawal' && req.fee && (
+                        <p className="text-[10px] font-bold text-red-500 uppercase">
+                          (Net: ${req.netAmount.toLocaleString()})
+                        </p>
+                      )}
+                    </div>
+                    {req.type === 'Withdrawal' && req.address && (
+                      <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-2 py-1 mt-1 max-w-[200px]">
+                        <p className="text-[9px] font-mono text-primary truncate flex-1">{req.address}</p>
+                        <button 
+                          onClick={() => copyToClipboard(req.address)}
+                          className="p-1 hover:text-white transition-colors"
+                          title="Copy Wallet Address"
+                        >
+                          <Copy size={10} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                   {req.status === 'pending' ? (
                     <div className="flex gap-2">

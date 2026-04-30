@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { Wallet, ArrowRight, AlertCircle, History, Filter, Calendar, X } from 'lucide-react';
+import { Wallet, ArrowRight, AlertCircle, History, Filter, Calendar, X, DollarSign } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '../lib/utils';
 import { RECENT_TRANSACTIONS, type User } from '../constants';
@@ -21,29 +21,33 @@ export const Withdraw = ({ user }: WithdrawProps) => {
   const [showFilters, setShowFilters] = useState(false);
 
   const handleWithdraw = () => {
-    if (!amount || parseFloat(amount) < 10) {
-      alert("Minimum withdrawal is $10.00");
+    const val = parseFloat(amount);
+    if (!amount || isNaN(val) || val < 7) {
+      alert("Minimum withdrawal is $7.00");
       return;
     }
     if (!address.trim()) {
       alert("Please enter a wallet address.");
       return;
     }
-    if (parseFloat(amount) > user.profit) {
+    if (val > user.profit) {
       alert("Insufficient profit balance.");
       return;
     }
 
     setIsSubmitting(true);
 
+    const commission = val * 0.07;
+    const netAmount = val - commission;
     const newTxId = 'WDR-' + Math.random().toString(36).substring(2, 10).toUpperCase();
-    const withdrawalAmount = parseFloat(amount);
     
     // Create real request for admin
     const newRequest = {
       id: newTxId,
       type: 'Withdrawal',
-      amount: withdrawalAmount,
+      amount: val,
+      fee: commission,
+      netAmount: netAmount,
       user: user.name,
       userEmail: user.email,
       status: 'pending',
@@ -55,7 +59,7 @@ export const Withdraw = ({ user }: WithdrawProps) => {
     localStorage.setItem('lumix_requests', JSON.stringify([...savedRequests, newRequest]));
 
     // Deduct from profit locally and globally
-    const updatedUser = { ...user, profit: user.profit - withdrawalAmount };
+    const updatedUser = { ...user, profit: user.profit - val };
     
     // Update lumix_users
     const savedUsersStr = localStorage.getItem('lumix_users') || '[]';
@@ -113,29 +117,61 @@ export const Withdraw = ({ user }: WithdrawProps) => {
           <Wallet size={100} className="text-primary" />
         </div>
 
-        <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4 flex items-center justify-between">
-          <div>
-            <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Available Profit</p>
-            <p className="text-2xl font-bold text-primary">${user.profit.toLocaleString()}</p>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+            <p className="text-[10px] text-gray-500 uppercase font-black tracking-wider mb-1">Trading Capital</p>
+            <p className="text-xl font-bold text-white opacity-40">${user.balance.toLocaleString()}</p>
+            <span className="text-[8px] text-gray-500 font-bold uppercase">Locked for Mining</span>
           </div>
-          <button 
-            onClick={() => setAmount(user.profit.toString())}
-            className="text-xs font-bold text-primary px-3 py-1 bg-primary/10 rounded-full border border-primary/20 hover:bg-primary/20 transition-all font-bold"
-          >
-            MAX
-          </button>
+          <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4 relative group">
+            <div className="absolute top-2 right-2">
+              <div className="w-2 h-2 bg-primary rounded-full animate-pulse shadow-[0_0_8px_rgba(0,200,83,0.8)]" />
+            </div>
+            <p className="text-[10px] text-primary uppercase font-black tracking-wider mb-1">Profit Wallet</p>
+            <p className="text-xl font-bold text-primary">${user.profit.toLocaleString()}</p>
+            <button 
+              onClick={() => setAmount(user.profit.toString())}
+              className="mt-2 w-full text-[10px] font-black text-black bg-primary rounded-lg py-1 hover:bg-white transition-all uppercase"
+            >
+              Use All
+            </button>
+          </div>
         </div>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-400 ml-1">Withdrawal Amount ($)</label>
-            <input 
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="Min $10.00"
-              className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-4 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all font-bold"
-            />
+            <div className="flex justify-between items-center px-1">
+              <label className="text-sm font-medium text-gray-400">Withdrawal Amount ($)</label>
+              <span className="text-[10px] font-black text-orange-500 uppercase">Min: $7.00</span>
+            </div>
+            <div className="relative group">
+              <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-primary transition-colors" size={18} />
+              <input 
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all font-bold text-white font-mono"
+              />
+            </div>
+
+            {parseFloat(amount) > 0 && (
+              <motion.div 
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-3 rounded-xl bg-black/40 border border-white/5 space-y-2"
+              >
+                <div className="flex justify-between text-[10px] font-bold uppercase">
+                  <span className="text-gray-500">Service Fee (7%)</span>
+                  <span className="text-red-400">-${(parseFloat(amount) * 0.07).toFixed(2)}</span>
+                </div>
+                <div className="h-px bg-white/5" />
+                <div className="flex justify-between text-xs font-black uppercase">
+                  <span className="text-gray-400">Net Arrival</span>
+                  <span className="text-primary">${(parseFloat(amount) * 0.93).toFixed(2)}</span>
+                </div>
+              </motion.div>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -151,15 +187,18 @@ export const Withdraw = ({ user }: WithdrawProps) => {
         </div>
 
         <div className="flex items-start gap-3 p-4 rounded-2xl bg-white/5 border border-white/5">
-          <AlertCircle size={20} className="text-gray-500 shrink-0 mt-0.5" />
-          <p className="text-xs text-gray-500 leading-relaxed">
-            Withdrawals are processed within 24 hours. Double-check your wallet address. Lumix is not responsible for funds sent to incorrect addresses.
-          </p>
+          <AlertCircle size={20} className="text-orange-500 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="text-[10px] font-black text-orange-500 uppercase tracking-widest">Withdrawal Policy</p>
+            <p className="text-[10px] text-gray-500 leading-relaxed">
+              Only funds in your <span className="text-white font-bold">Profit Wallet</span> (Mining earnings & commissions) are withdrawable. Main Balance is reserved for trading and mining operations.
+            </p>
+          </div>
         </div>
 
         <button 
           onClick={handleWithdraw}
-          disabled={isSubmitting || !amount || parseFloat(amount) < 10 || !address}
+          disabled={isSubmitting || !amount || parseFloat(amount) < 7 || !address}
           className="w-full bg-primary disabled:opacity-50 disabled:grayscale hover:bg-primary/90 text-black font-bold py-4 rounded-2xl transition-all glow-green active:scale-95 flex items-center justify-center gap-2"
         >
           {isSubmitting ? (

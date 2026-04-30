@@ -29,7 +29,7 @@ export const Auth = ({ onLogin }: AuthProps) => {
           <div className="p-4 rounded-3xl bg-primary/10 border border-primary/20 mb-4 shadow-[0_0_15px_rgba(0,200,83,0.3)]">
             <ShieldCheck size={40} className="text-primary" />
           </div>
-          <h1 className="text-4xl font-black tracking-tighter text-glow-green">LUMIX</h1>
+          <h1 className="text-4xl font-black tracking-tighter text-glow-green">CRYPTOMAX</h1>
           <p className="text-gray-400 font-medium">Digital Assets Ecosystem</p>
         </div>
 
@@ -125,10 +125,16 @@ export const Auth = ({ onLogin }: AuthProps) => {
             </button>
           </form>
 
-          <div className="flex items-center gap-4 py-2">
-            <div className="h-[1px] flex-1 bg-white/5" />
-            <span className="text-[10px] text-gray-500 uppercase font-black tracking-widest">Secure Gateway</span>
-            <div className="h-[1px] flex-1 bg-white/5" />
+          <div className="flex flex-col items-center gap-2 py-2">
+            <div className="flex items-center gap-4 w-full">
+              <div className="h-[1px] flex-1 bg-white/5" />
+              <span className="text-[10px] text-gray-500 uppercase font-black tracking-widest">Secure Gateway</span>
+              <div className="h-[1px] flex-1 bg-white/5" />
+            </div>
+            <div className="flex items-center gap-1.5 opacity-40">
+              <span className="w-1.5 h-1.5 bg-primary rounded-full" />
+              <span className="text-[9px] font-black uppercase text-white tracking-[0.2em]">Singapore Node</span>
+            </div>
           </div>
         </div>
       </motion.div>

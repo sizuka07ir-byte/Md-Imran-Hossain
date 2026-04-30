@@ -1,28 +1,55 @@
 import { motion } from 'motion/react';
-import { User, Settings, Shield, Bell, HelpCircle, LogOut, ChevronRight, Mail, Phone, MapPin, Share2, Copy, Check, ShieldAlert } from 'lucide-react';
+import { User, Settings, Shield, Bell, HelpCircle, LogOut, ChevronRight, Mail, Phone, MapPin, Share2, Copy, Check, ShieldAlert, Camera, X, Users } from 'lucide-react';
 import { type User as UserType } from '../constants';
 import { cn } from '../lib/utils';
-import { useState } from 'react';
+import { useState, ChangeEvent } from 'react';
 
 interface ProfileProps {
   user: UserType;
   onLogout?: () => void;
   onNavigate?: (tab: string) => void;
   onUpdateUser?: (updatedUser: UserType) => void;
+  openNotifications?: () => void;
 }
 
-export const Profile = ({ user, onLogout, onNavigate, onUpdateUser }: ProfileProps) => {
+export const Profile = ({ user, onLogout, onNavigate, onUpdateUser, openNotifications }: ProfileProps) => {
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(user.name);
   const [editPhone, setEditPhone] = useState('+1 (555) 000-0000');
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert("Image size must be less than 2MB");
+      return;
+    }
+
+    setIsUploading(true);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = reader.result as string;
+      if (onUpdateUser) {
+        onUpdateUser({
+          ...user,
+          avatar: base64String
+        });
+      }
+      setIsUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
   
   const menuItems = [
+    { icon: Users, label: 'My Team', color: 'text-primary', id: 'my-team' },
     { icon: Settings, label: 'Account Settings', color: 'text-gray-400' },
     { icon: Shield, label: 'Security & 2FA', color: 'text-blue-400' },
-    { icon: Bell, label: 'Notifications', color: 'text-yellow-400' },
+    { icon: Bell, label: 'Notifications & History', color: 'text-yellow-400', action: openNotifications },
     { icon: HelpCircle, label: 'Support Center', color: 'text-primary' },
-    { icon: Share2, label: 'Telegram Support', color: 'text-blue-500', action: () => window.open('https://t.me/prime_nobita', '_blank') },
+    { icon: Share2, label: 'Telegram Support', color: 'text-blue-500', action: () => window.open('https://t.me/Cryptomax99', '_blank') },
   ];
 
   if (user.isAdmin) {
@@ -42,18 +69,41 @@ export const Profile = ({ user, onLogout, onNavigate, onUpdateUser }: ProfilePro
   return (
     <div className="space-y-6 pb-20">
       <header className="flex flex-col items-center py-8">
-        <div className="relative">
-          <div className="h-24 w-24 rounded-full border-2 border-primary p-1 bg-primary/10 flex items-center justify-center shadow-[0_0_15px_rgba(0,200,83,0.3)] mb-4 overflow-hidden">
-             <span className="text-3xl font-bold text-primary">{user.name.split(' ').map(n => n[0]).join('')}</span>
+        <div className="relative group">
+          <div className="h-28 w-28 rounded-full border-2 border-primary p-1 bg-primary/10 flex items-center justify-center shadow-[0_0_20px_rgba(0,200,83,0.3)] mb-4 overflow-hidden relative">
+            {user.avatar ? (
+              <img src={user.avatar} alt={user.name} className="w-full h-full object-cover rounded-full" />
+            ) : (
+              <span className="text-4xl font-bold text-primary">{user.name.split(' ').map(n => n[0]).join('')}</span>
+            )}
+            
+            {/* Upload Overlay */}
+            <label className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+              <Camera size={24} className="text-primary mb-1" />
+              <span className="text-[10px] font-black uppercase text-white">Update</span>
+              <input 
+                type="file" 
+                accept="image/*" 
+                className="hidden" 
+                onChange={handleImageUpload} 
+              />
+            </label>
+            
+            {isUploading && (
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
           </div>
+          
           <button 
             onClick={() => setIsEditing(!isEditing)}
             className={cn(
-              "absolute bottom-4 right-0 h-8 w-8 rounded-full border-4 border-[#050505] flex items-center justify-center text-black shadow-lg transition-all",
-              isEditing ? "bg-red-500" : "bg-primary"
+              "absolute bottom-4 -right-2 h-10 w-10 rounded-xl border-4 border-[#050505] flex items-center justify-center text-black shadow-xl transition-all z-10",
+              isEditing ? "bg-red-500 rotate-45" : "bg-primary"
             )}
           >
-            {isEditing ? <Check size={14} onClick={handleSave} /> : <Settings size={14} />}
+            {isEditing ? <X size={20} /> : <Settings size={18} />}
           </button>
         </div>
         
@@ -107,11 +157,11 @@ export const Profile = ({ user, onLogout, onNavigate, onUpdateUser }: ProfilePro
         <div className="bg-black/40 border border-white/5 rounded-2xl p-4 flex items-center justify-between gap-3">
           <div className="overflow-hidden">
             <p className="text-[10px] text-gray-500 font-black uppercase mb-1">Your Referral Link</p>
-            <p className="text-xs font-mono text-primary truncate">lumix.io/ref={user.referralCode}</p>
+            <p className="text-xs font-mono text-primary truncate">cryptomax.io/ref={user.referralCode}</p>
           </div>
           <button 
             onClick={() => {
-              navigator.clipboard.writeText(`https://lumix.io/ref=${user.referralCode}`);
+              navigator.clipboard.writeText(`https://cryptomax.io/ref=${user.referralCode}`);
               setCopied(true);
               setTimeout(() => setCopied(false), 2000);
             }}
@@ -131,6 +181,10 @@ export const Profile = ({ user, onLogout, onNavigate, onUpdateUser }: ProfilePro
               <button
                 key={item.label}
                 onClick={() => {
+                  if (item.id === 'my-team' && onNavigate) {
+                    onNavigate('my-team');
+                    return;
+                  }
                   if (item.action) {
                     item.action();
                     return;
@@ -179,7 +233,7 @@ export const Profile = ({ user, onLogout, onNavigate, onUpdateUser }: ProfilePro
           </div>
           <div className="flex items-center gap-3 text-sm text-gray-400">
             <MapPin size={16} />
-            <span>Encrypted Location</span>
+            <span>Singapore</span>
           </div>
         </div>
       </div>

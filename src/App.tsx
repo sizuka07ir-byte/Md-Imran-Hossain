@@ -16,6 +16,8 @@ import { Auth } from './components/Auth';
 import { Admin } from './components/Admin';
 import { NotificationCenter } from './components/NotificationCenter';
 import { SupportChat } from './components/SupportChat';
+import { MyTeam } from './components/MyTeam';
+import { WelcomeBanner } from './components/WelcomeBanner';
 import { DUMMY_USER, DUMMY_NOTIFICATIONS, createNewUser, type User, type Notification, type SupportMessage, MINING_PLANS } from './constants';
 
 export default function App() {
@@ -27,6 +29,7 @@ export default function App() {
   const [notifications, setNotifications] = useState<Notification[]>(DUMMY_NOTIFICATIONS);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [supportMessages, setSupportMessages] = useState<SupportMessage[]>([]);
+  const [showWelcomeBanner, setShowWelcomeBanner] = useState(false);
 
   useEffect(() => {
     // Check for saved session
@@ -111,16 +114,21 @@ export default function App() {
         return;
       }
 
-      const newUser = createNewUser(name, email);
+      const newUser: User = {
+        ...createNewUser(name, email),
+        referredBy: referralCode // Store who referred this user
+      };
+      
       const updatedUsers = [...savedUsers, newUser];
       localStorage.setItem('lumix_users', JSON.stringify(updatedUsers));
       localStorage.setItem('lumix_current_user', JSON.stringify(newUser));
       setUser(newUser);
       setIsLoggedIn(true);
+      setShowWelcomeBanner(true);
       
       addNotification({
-        title: 'Welcome to LUMIX',
-        message: `Your account has been created ${referralCode ? 'using referral ' + referralCode : 'with a $0 initial balance.'}`,
+        title: '🎊 Welcome to CRYPTOMAX',
+        message: `Your account has been created successfully. Welcome to the elite digital mining ecosystem!`,
         type: 'system'
       });
 
@@ -154,7 +162,7 @@ export default function App() {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'home': return <Dashboard user={user} />;
+      case 'home': return <Dashboard user={user} openNotifications={() => setIsNotificationsOpen(true)} />;
       case 'deposit': return <Deposit 
         user={user}
         onReturnToHome={() => setActiveTab('home')} 
@@ -173,25 +181,40 @@ export default function App() {
           const plan = MINING_PLANS.find(p => p.id === planId);
           
           if (isOn) {
-            // Anyone can turn ON if they have balance
-            const currentBalance = user.balance;
-            if (plan && currentBalance < plan.minInvestment) {
-              alert(`Insufficient balance. Minimum investment for ${plan.name} is $${plan.minInvestment}.`);
+            // Anyone can turn ON if they have the plan's minimum balance
+            const currentBalance = Number(user.balance || 0);
+            if (!plan || currentBalance < plan.minInvestment) {
+              const minAmount = plan ? plan.minInvestment : 10;
+              alert(`Insufficient balance. Minimum investment to start ${plan?.name || 'mining'} is $${minAmount.toFixed(2)}.`);
               return false;
             }
             
+            // Calculate bonus eligibility
+            const now = new Date();
+            const bonusDate = new Date();
+            bonusDate.setHours(0, 0, 0, 0);
+            
+            // If started after midnight (00:00 to 03:59), they get bonus the day after tomorrow
+            // Otherwise, they get it tomorrow
+            if (now.getHours() < 4) {
+              bonusDate.setDate(now.getDate() + 2);
+            } else {
+              bonusDate.setDate(now.getDate() + 1);
+            }
+
             const updatedUser: User = { 
               ...user, 
               balance: 0, 
-              miningBalance: Number(user.miningBalance || 0) + Number(currentBalance),
-              profit: Number(user.profit || 0) + (Number(currentBalance) * 0.05),
-              activeNodes: [...(user.activeNodes || []), planId]
+              miningBalance: Number(user.miningBalance || 0) + currentBalance,
+              activeNodes: [...(user.activeNodes || []), planId],
+              miningStartedAt: now.toISOString(),
+              bonusStartDate: bonusDate.toISOString()
             };
             
             handleUpdateUser(updatedUser);
             addNotification({
               title: 'Mining Started ✅',
-              message: `Nodes deployed successfully. $${Number(currentBalance).toFixed(2)} transferred to mining wallet.`,
+              message: `Mining started. Bonus eligibility starts: ${bonusDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}.`,
               type: 'mining'
             });
             return true;
@@ -212,10 +235,12 @@ export default function App() {
               if (nodeIds.includes(planId)) {
                 affectedCount++;
                 const investment = Number(u.miningBalance || 0);
-                const bonus = investment * 0.03; // 3% bonus
+                const commission = (investment * 3) / 100; 
+                
                 return {
                   ...u,
-                  balance: Number(u.balance || 0) + investment + bonus,
+                  balance: Number(u.balance || 0) + investment,
+                  profit: Number(u.profit || 0) + commission,
                   miningBalance: 0,
                   activeNodes: nodeIds.filter(id => id !== planId)
                 };
@@ -224,27 +249,29 @@ export default function App() {
             });
 
             localStorage.setItem('lumix_users', JSON.stringify(updatedUsers));
-
-            // Sync current user if they are the admin (which they are) and were affected
-            const syncUser = updatedUsers.find(u => u.email === user.email);
-            if (syncUser) {
-              setUser(syncUser);
-              localStorage.setItem('lumix_current_user', JSON.stringify(syncUser));
+            
+            // Update current user state
+            const updatedCurrentUser = updatedUsers.find(u => u.email === user.email);
+            if (updatedCurrentUser) {
+              setUser(updatedCurrentUser);
+              localStorage.setItem('lumix_current_user', JSON.stringify(updatedCurrentUser));
             }
 
             addNotification({
-              title: 'Global Node Shutdown',
-              message: `${plan?.name} power cycle completed globally. ${affectedCount} user(s) received a 3% bonus.`,
+              title: 'Mining Node Offline ⚡',
+              message: `System node ${plan?.name} has been deactivated. ${affectedCount} users received capital back + 3% commission.`,
               type: 'mining'
             });
+            
             return true;
           }
         }}
       />;
       case 'withdraw': return <Withdraw user={user} />;
-      case 'profile': return <Profile user={user} onLogout={handleLogout} onNavigate={setActiveTab} onUpdateUser={handleUpdateUser} />;
-      case 'admin': return <Admin />;
-      default: return <Dashboard user={user} />;
+      case 'profile': return <Profile user={user} onLogout={handleLogout} onNavigate={setActiveTab} onUpdateUser={handleUpdateUser} openNotifications={() => setIsNotificationsOpen(true)} />;
+      case 'my-team': return <MyTeam user={user} onBack={() => setActiveTab('profile')} />;
+      case 'admin': return <Admin currentUser={user} onUpdateUser={handleUpdateUser} />;
+      default: return <Dashboard user={user} openNotifications={() => setIsNotificationsOpen(true)} />;
     }
   };
 
@@ -313,15 +340,21 @@ export default function App() {
           </div>
           <button 
             onClick={() => setIsNotificationsOpen(true)}
-            className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center bg-white/5 relative hover:bg-white/10 transition-colors"
+            className="w-10 h-10 rounded-xl border border-primary/20 flex items-center justify-center bg-primary/5 relative hover:bg-primary/10 transition-all group active:scale-90"
           >
-            <Bell size={18} className="text-gray-400" />
+            <Bell size={20} className="text-primary group-hover:scale-110 transition-transform" />
             {notifications.some(n => !n.read) && (
-              <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-primary rounded-full shadow-[0_0_8px_rgba(0,200,83,0.8)]" />
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-black animate-bounce">
+                {notifications.filter(n => !n.read).length}
+              </span>
             )}
           </button>
-          <div className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center bg-white/5">
-            <span className="text-primary font-bold text-xs">{user.name.split(' ').map(n => n[0]).join('')}</span>
+          <div className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center bg-white/5 overflow-hidden">
+            {user.avatar ? (
+              <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-primary font-bold text-xs">{user.name.split(' ').map(n => n[0]).join('')}</span>
+            )}
           </div>
         </div>
       </header>
@@ -368,6 +401,12 @@ export default function App() {
         onClose={() => setIsChatOpen(false)} 
         messages={supportMessages.filter(m => m.userEmail === user.email)}
         onSendMessage={sendSupportMessage}
+      />
+
+      <WelcomeBanner
+        isOpen={showWelcomeBanner}
+        onClose={() => setShowWelcomeBanner(false)}
+        userName={user.name}
       />
 
       <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} user={user} />

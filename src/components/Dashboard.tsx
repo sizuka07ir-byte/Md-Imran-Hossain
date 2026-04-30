@@ -6,18 +6,29 @@ import { cn } from '../lib/utils';
 
 interface DashboardProps {
   user: User;
+  openNotifications: () => void;
 }
 
-export const Dashboard = ({ user }: DashboardProps) => {
+export const Dashboard = ({ user, openNotifications }: DashboardProps) => {
   return (
     <div className="space-y-6 pb-20">
       <header className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-glow-green">Welcome back,</h2>
-          <p className="text-gray-400 text-sm">{user.name.split(' ')[0]}, check your portfolio updates.</p>
+          <div className="flex items-center gap-2">
+            <p className="text-gray-400 text-sm">{user.name.split(' ')[0]}, check your portfolio updates.</p>
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20 text-[8px] font-black text-primary uppercase tracking-tighter">
+              <span className="w-1 h-1 bg-primary rounded-full animate-pulse" />
+              HQ: Singapore
+            </span>
+          </div>
         </div>
-        <div className="h-10 w-10 rounded-full border border-primary/30 p-1 bg-primary/10 flex items-center justify-center">
-          <span className="text-primary font-bold text-xs">{user.name.split(' ').map(n => n[0]).join('')}</span>
+        <div className="h-10 w-10 rounded-full border border-primary/30 p-1 bg-primary/10 flex items-center justify-center overflow-hidden">
+          {user.avatar ? (
+            <img src={user.avatar} alt={user.name} className="w-full h-full object-cover rounded-full" />
+          ) : (
+            <span className="text-primary font-bold text-xs">{user.name.split(' ').map(n => n[0]).join('')}</span>
+          )}
         </div>
       </header>
 
@@ -30,14 +41,18 @@ export const Dashboard = ({ user }: DashboardProps) => {
           <TrendingUp size={80} className="text-primary" />
         </div>
         
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-2">
           <div className="space-y-1">
-            <p className="text-gray-400 text-xs font-bold uppercase tracking-wider">Main Wallet</p>
-            <h1 className="text-2xl font-black tracking-tight">${(user.balance ?? 0).toLocaleString()}</h1>
+            <p className="text-gray-400 text-[8px] font-black uppercase tracking-wider">Main</p>
+            <h1 className="text-lg font-black tracking-tight">${(user.balance ?? 0).toLocaleString()}</h1>
+          </div>
+          <div className="space-y-1 text-center border-x border-white/5">
+            <p className="text-primary text-[8px] font-black uppercase tracking-wider">Mining</p>
+            <h1 className="text-lg font-black tracking-tight text-white">${(user.miningBalance ?? 0).toLocaleString()}</h1>
           </div>
           <div className="space-y-1 text-right">
-            <p className="text-primary text-xs font-bold uppercase tracking-wider">Mining Wallet</p>
-            <h1 className="text-2xl font-black tracking-tight text-white">${(user.miningBalance ?? 0).toLocaleString()}</h1>
+            <p className="text-orange-500 text-[8px] font-black uppercase tracking-wider">Profit</p>
+            <h1 className="text-lg font-black tracking-tight text-white">${(user.profit ?? 0).toLocaleString()}</h1>
           </div>
         </div>
 
@@ -69,7 +84,7 @@ export const Dashboard = ({ user }: DashboardProps) => {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold">Recent Transactions</h3>
-          <button className="text-primary text-sm font-medium">View All</button>
+          <button onClick={openNotifications} className="text-primary text-sm font-medium">View All</button>
         </div>
         <div className="space-y-3">
           {RECENT_TRANSACTIONS.map((tx, i) => (

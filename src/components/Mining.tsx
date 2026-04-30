@@ -15,7 +15,7 @@ export const Mining = ({ user, onToggleMining }: MiningProps) => {
     const isActive = (user.activeNodes || []).includes(planId);
     
     if (isActive && !user.isAdmin) {
-      alert("Access Denied: Only administrators can power down compute nodes.");
+      alert("অ্যাক্সেস ডিনাইড: মাইনিং নোড বন্ধ করার ক্ষমতা শুধুমাত্র এডমিনের আছে।");
       return;
     }
     
@@ -76,17 +76,23 @@ export const Mining = ({ user, onToggleMining }: MiningProps) => {
                       handleToggle(plan.id);
                     }}
                     className={cn(
-                      "w-12 h-6 rounded-full p-1 transition-all duration-300 relative",
-                      isActive ? "bg-primary shadow-[0_0_10px_rgba(0,200,83,0.4)]" : "bg-white/10"
+                      "w-20 h-10 rounded-full p-1 transition-all duration-500 relative flex items-center",
+                      isActive ? "bg-primary shadow-[0_0_20px_rgba(0,200,83,0.5)]" : "bg-white/10"
                     )}
                   >
+                    <div className="absolute inset-x-2 flex justify-between text-[8px] font-black uppercase pointer-events-none">
+                      <span className={cn(isActive ? "text-black/40" : "text-white/40")}>Off</span>
+                      <span className={cn(isActive ? "text-black" : "text-white/10")}>On</span>
+                    </div>
                     <motion.div
-                      animate={{ x: isActive ? 24 : 0 }}
+                      animate={{ x: isActive ? 40 : 0 }}
                       className={cn(
-                        "w-4 h-4 rounded-full shadow-sm",
+                        "w-8 h-8 rounded-full shadow-xl z-10 flex items-center justify-center",
                         isActive ? "bg-black" : "bg-gray-400"
                       )}
-                    />
+                    >
+                      <Power size={14} className={isActive ? "text-primary" : "text-gray-200"} />
+                    </motion.div>
                   </button>
                   <div className="text-right">
                     <span className={cn(
@@ -97,9 +103,16 @@ export const Mining = ({ user, onToggleMining }: MiningProps) => {
                     </span>
                   </div>
                   {isActive && (
-                    <div className="flex items-center gap-1 bg-black/20 px-2 py-1 rounded-lg">
-                      <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
-                      <span className="text-[8px] font-bold uppercase text-primary">Active</span>
+                    <div className="flex flex-col items-end gap-1">
+                      <div className="flex items-center gap-1 bg-black/20 px-2 py-1 rounded-lg">
+                        <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
+                        <span className="text-[8px] font-bold uppercase text-primary">Active</span>
+                      </div>
+                      {user.bonusStartDate && (
+                        <span className="text-[7px] font-black uppercase text-gray-500 tracking-tighter">
+                          Bonus: {new Date(user.bonusStartDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>

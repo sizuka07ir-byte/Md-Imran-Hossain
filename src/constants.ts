@@ -9,6 +9,10 @@ export interface User {
   isAdmin?: boolean;
   isBanned?: boolean;
   activeNodes?: string[];
+  avatar?: string;
+  referredBy?: string;
+  miningStartedAt?: string;
+  bonusStartDate?: string;
 }
 
 export interface Transaction {
@@ -18,6 +22,7 @@ export interface Transaction {
   status: 'pending' | 'completed' | 'failed';
   date: string;
   method: string;
+  address?: string;
 }
 
 export interface MiningPlan {
@@ -65,27 +70,11 @@ export const createNewUser = (name: string, email: string): User => {
 export const MINING_PLANS: MiningPlan[] = [
   {
     id: 'starter',
-    name: 'Starter Node',
-    dailyProfit: 1.2,
-    duration: 30,
-    minInvestment: 100,
-    icon: 'Zap',
-  },
-  {
-    id: 'pro',
-    name: 'Advanced Hash',
+    name: 'Standard Miner',
     dailyProfit: 2.5,
-    duration: 60,
-    minInvestment: 500,
+    duration: 30,
+    minInvestment: 10,
     icon: 'Cpu',
-  },
-  {
-    id: 'enterprise',
-    name: 'Quantum Core',
-    dailyProfit: 4.8,
-    duration: 90,
-    minInvestment: 2500,
-    icon: 'HardDrive',
   },
 ];
 
@@ -129,7 +118,7 @@ export interface Notification {
 export const DUMMY_NOTIFICATIONS: Notification[] = [
   {
     id: 'n1',
-    title: 'Welcome to Lumix',
+    title: 'Welcome to CRYPTOMAX',
     message: 'Your account has been successfully secured. Start mining to earn daily profits.',
     time: '2 hours ago',
     type: 'system',
