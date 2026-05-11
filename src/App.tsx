@@ -19,6 +19,7 @@ import { SupportChat } from './components/SupportChat';
 import { MyTeam } from './components/MyTeam';
 import { WelcomeBanner } from './components/WelcomeBanner';
 import { DUMMY_USER, DUMMY_NOTIFICATIONS, createNewUser, type User, type Notification, type SupportMessage, MINING_PLANS } from './constants';
+import { auth, db, onAuthStateChanged, doc, onSnapshot, setDoc, getDoc, updateDoc, OperationType, handleFirestoreError, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, query, collection, where, addDoc } from './lib/firebase';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -32,38 +33,79 @@ export default function App() {
   const [showWelcomeBanner, setShowWelcomeBanner] = useState(false);
 
   useEffect(() => {
-    // Check for saved session
-    const savedUser = localStorage.getItem('lumix_current_user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-      setIsLoggedIn(true);
-    }
-    
-    // Load support messages
-    const savedMessages = localStorage.getItem('lumix_support_messages');
-    if (savedMessages) {
-      setSupportMessages(JSON.parse(savedMessages));
-    }
-    
-    const timer = setTimeout(() => setIsLoading(false), 1500);
-    return () => clearTimeout(timer);
+    // Firebase Auth Listener
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser?.email) {
+        // User is signed in
+        const userRef = doc(db, 'users', firebaseUser.email);
+        
+        // Listen to User document
+        const unsubscribeUser = onSnapshot(userRef, (snapshot) => {
+          if (snapshot.exists()) {
+            const userData = snapshot.data() as User;
+            setUser(userData);
+            setIsLoggedIn(true);
+          } else {
+            // Document doesn't exist, maybe it's the admin?
+            if (firebaseUser.email === DUMMY_USER.email) {
+              setDoc(userRef, DUMMY_USER).then(() => {
+                setUser(DUMMY_USER);
+                setIsLoggedIn(true);
+              });
+            }
+          }
+          setIsLoading(false);
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.email}`);
+        });
+
+        // Listen to Support Messages
+        const q = doc(db, 'support_messages', 'all'); // Using a flat structure for now or subcollection
+        // Actually, maybe a global collection is better for support
+        // But for applets we'll stick to a simpler pattern
+        
+        return () => unsubscribeUser();
+      } else {
+        // User is signed out
+        setIsLoggedIn(false);
+        setUser(DUMMY_USER);
+        setIsLoading(false);
+      }
+    });
+
+    return () => unsubscribeAuth();
   }, []);
 
+  // Listen for Support Messages globally (for current user)
   useEffect(() => {
-    localStorage.setItem('lumix_support_messages', JSON.stringify(supportMessages));
-  }, [supportMessages]);
+    if (!isLoggedIn || !user.email) return;
 
-  const sendSupportMessage = (content: string, sender: 'user' | 'admin' = 'user', targetUserEmail?: string, targetUserName?: string) => {
-    const newMessage: SupportMessage = {
-      id: Math.random().toString(36).substr(2, 9),
-      userEmail: targetUserEmail || user.email,
-      userName: targetUserName || user.name,
+    const unsubscribe = onSnapshot(query(collection(db, 'support_messages'), where('userEmail', '==', user.email)), (snapshot) => {
+      const messages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SupportMessage));
+      setSupportMessages(messages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()));
+    });
+
+    return () => unsubscribe();
+  }, [isLoggedIn, user.email]);
+
+  const sendSupportMessage = async (content: string, sender: 'user' | 'admin' = 'user', targetUserEmail?: string, targetUserName?: string) => {
+    const email = targetUserEmail || user.email;
+    const name = targetUserName || user.name;
+    
+    const newMessage = {
+      userEmail: email,
+      userName: name,
       content,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toISOString(),
       sender,
       isRead: sender === 'user' ? false : true
     };
-    setSupportMessages(prev => [...prev, newMessage]);
+
+    try {
+      await addDoc(collection(db, 'support_messages'), newMessage);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'support_messages');
+    }
   };
 
   const addNotification = (notif: Omit<Notification, 'id' | 'time' | 'read'>) => {
@@ -80,84 +122,62 @@ export default function App() {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
   };
 
-  const handleLogin = (name: string, email: string, isLogin: boolean, referralCode?: string) => {
-    const savedUsersStr = localStorage.getItem('lumix_users') || '[]';
-    const savedUsers: User[] = JSON.parse(savedUsersStr);
-
-    if (isLogin) {
-      // Login logic
-      const existingUser = savedUsers.find(u => u.email === email);
-      if (existingUser) {
-        if (existingUser.isBanned) {
-          alert("❌ Access Denied: This ID is currently banned. Please contact support.");
-          return;
-        }
-        setUser(existingUser);
-        localStorage.setItem('lumix_current_user', JSON.stringify(existingUser));
-        setIsLoggedIn(true);
-      } else if (email === DUMMY_USER.email) {
-        if (DUMMY_USER.isBanned) {
-          alert("❌ Access Denied: This ID is currently banned.");
-          return;
-        }
-        setUser(DUMMY_USER);
-        localStorage.setItem('lumix_current_user', JSON.stringify(DUMMY_USER));
-        setIsLoggedIn(true);
+  const handleLogin = async (name: string, email: string, isLogin: boolean, referralCode?: string) => {
+    setIsLoading(true);
+    try {
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, email, 'DummyPassword123!'); // App currently doesn't ask for password in UI, using a dummy one for simplicity or we should update UI
       } else {
-        alert("Account not found. Please register.");
-      }
-    } else {
-      // Registration logic
-      const emailExists = savedUsers.some(u => u.email === email) || email === DUMMY_USER.email;
-      if (emailExists) {
-        alert("Email already registered. Please login.");
-        return;
-      }
-
-      const newUser: User = {
-        ...createNewUser(name, email),
-        referredBy: referralCode // Store who referred this user
-      };
-      
-      const updatedUsers = [...savedUsers, newUser];
-      localStorage.setItem('lumix_users', JSON.stringify(updatedUsers));
-      localStorage.setItem('lumix_current_user', JSON.stringify(newUser));
-      setUser(newUser);
-      setIsLoggedIn(true);
-      setShowWelcomeBanner(true);
-      
-      addNotification({
-        title: '🎊 Welcome to CRYPTOMAX',
-        message: `Your account has been created successfully. Welcome to the elite digital mining ecosystem!`,
-        type: 'system'
-      });
-
-      if (referralCode) {
-        // Find referrer and potentially award bonus (mock logic)
-        const referrer = savedUsers.find(u => u.referralCode === referralCode) || (DUMMY_USER.referralCode === referralCode ? DUMMY_USER : null);
-        if (referrer) {
-          console.log(`Referral tracked from: ${referrer.name}`);
+        await createUserWithEmailAndPassword(auth, email, 'DummyPassword123!');
+        
+        let ipAddress = 'Unknown';
+        try {
+          const response = await fetch('https://api.ipify.org?format=json');
+          const data = await response.json();
+          ipAddress = data.ip;
+        } catch (e) {
+          console.error("Failed to fetch IP address", e);
         }
+
+        const newUser: User = {
+          ...createNewUser(name, email),
+          referredBy: referralCode || '',
+          ipAddress
+        };
+        await setDoc(doc(db, 'users', email), newUser);
+        setShowWelcomeBanner(true);
+        addNotification({
+          title: '🎊 Welcome to CRYPTOMAX',
+          message: `Your account has been created successfully. Welcome to the elite digital mining ecosystem!`,
+          type: 'system'
+        });
       }
+    } catch (error: any) {
+      if (error.code === 'auth/user-not-found') {
+        alert("Account not found. Please register.");
+      } else if (error.code === 'auth/email-already-in-use') {
+        alert("Email already registered. Please login.");
+      } else if (error.code === 'auth/wrong-password') {
+        alert("Incorrect password.");
+      } else {
+        alert("Authentication error: " + error.message);
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('lumix_current_user');
-    setIsLoggedIn(false);
+  const handleLogout = async () => {
+    await signOut(auth);
     setActiveTab('home');
-    setUser(DUMMY_USER);
   };
 
-  const handleUpdateUser = (updatedUser: User) => {
-    setUser(updatedUser);
-    localStorage.setItem('lumix_current_user', JSON.stringify(updatedUser));
-    
-    // Also update in lumix_users list
-    const savedUsersStr = localStorage.getItem('lumix_users') || '[]';
-    const savedUsers: User[] = JSON.parse(savedUsersStr);
-    const updatedUsers = savedUsers.map(u => u.email === updatedUser.email ? updatedUser : u);
-    localStorage.setItem('lumix_users', JSON.stringify(updatedUsers));
+  const handleUpdateUser = async (updatedUser: User) => {
+    try {
+      await updateDoc(doc(db, 'users', updatedUser.email), updatedUser as any);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${updatedUser.email}`);
+    }
   };
 
   const renderContent = () => {

@@ -13,6 +13,7 @@ export interface User {
   referredBy?: string;
   miningStartedAt?: string;
   bonusStartDate?: string;
+  ipAddress?: string;
 }
 
 export interface Transaction {

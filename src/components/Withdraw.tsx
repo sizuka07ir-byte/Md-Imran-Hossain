@@ -1,8 +1,9 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { Wallet, ArrowRight, AlertCircle, History, Filter, Calendar, X, DollarSign } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { cn } from '../lib/utils';
 import { RECENT_TRANSACTIONS, type User } from '../constants';
+import { db, collection, addDoc, query, where, onSnapshot, OperationType, handleFirestoreError, doc, updateDoc } from '../lib/firebase';
 
 interface WithdrawProps {
   user: User;
@@ -20,7 +21,29 @@ export const Withdraw = ({ user }: WithdrawProps) => {
   const [endDate, setEndDate] = useState('');
   const [showFilters, setShowFilters] = useState(false);
 
-  const handleWithdraw = () => {
+  const [userRequests, setUserRequests] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!user.email) return;
+    const q = query(collection(db, 'requests'), where('userEmail', '==', user.email));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const requests = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })).map((r: any) => ({
+        id: r.id,
+        type: r.type.toLowerCase() as 'deposit' | 'withdraw',
+        amount: r.amount,
+        status: r.status,
+        date: r.date.split('T')[0],
+        method: r.method || r.address || r.type
+      }));
+      setUserRequests(requests);
+    });
+    return () => unsubscribe();
+  }, [user.email]);
+
+  const handleWithdraw = async () => {
     const val = parseFloat(amount);
     if (!amount || isNaN(val) || val < 7) {
       alert("Minimum withdrawal is $7.00");
@@ -39,11 +62,9 @@ export const Withdraw = ({ user }: WithdrawProps) => {
 
     const commission = val * 0.07;
     const netAmount = val - commission;
-    const newTxId = 'WDR-' + Math.random().toString(36).substring(2, 10).toUpperCase();
     
     // Create real request for admin
     const newRequest = {
-      id: newTxId,
       type: 'Withdrawal',
       amount: val,
       fee: commission,
@@ -55,41 +76,23 @@ export const Withdraw = ({ user }: WithdrawProps) => {
       address: address
     };
 
-    const savedRequests = JSON.parse(localStorage.getItem('lumix_requests') || '[]');
-    localStorage.setItem('lumix_requests', JSON.stringify([...savedRequests, newRequest]));
+    try {
+      await addDoc(collection(db, 'requests'), newRequest);
+      
+      // Deduct from profit in Firestore
+      await updateDoc(doc(db, 'users', user.email), {
+        profit: user.profit - val
+      });
 
-    // Deduct from profit locally and globally
-    const updatedUser = { ...user, profit: user.profit - val };
-    
-    // Update lumix_users
-    const savedUsersStr = localStorage.getItem('lumix_users') || '[]';
-    const savedUsers: User[] = JSON.parse(savedUsersStr);
-    const updatedUsers = savedUsers.map(u => u.email === user.email ? updatedUser : u);
-    localStorage.setItem('lumix_users', JSON.stringify(updatedUsers));
-    
-    // Update lumix_current_user
-    localStorage.setItem('lumix_current_user', JSON.stringify(updatedUser));
-
-    // Force page refresh or state update in parent would be better, but for now we'll rely on the alert and simulated async
-    setTimeout(() => {
       setIsSubmitting(false);
       setAmount('');
       setAddress('');
       alert("Withdrawal request submitted successfully! Funds have been deducted and are pending admin approval.");
-      window.location.reload(); // Simple way to sync all states
-    }, 1500);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'requests');
+      setIsSubmitting(false);
+    }
   };
-
-  const userRequests = JSON.parse(localStorage.getItem('lumix_requests') || '[]')
-    .filter((r: any) => r.userEmail === user.email)
-    .map((r: any) => ({
-      id: r.id,
-      type: r.type.toLowerCase() as 'deposit' | 'withdraw',
-      amount: r.amount,
-      status: r.status,
-      date: r.date.split('T')[0],
-      method: r.method || r.address || r.type
-    }));
 
   const filteredHistory = [...RECENT_TRANSACTIONS, ...userRequests].filter(t => {
     // Type filter

@@ -1,0 +1,71 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and account balances",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "balance": { "type": "number" },
+        "miningBalance": { "type": "number" },
+        "profit": { "type": "number" },
+        "miningPower": { "type": "number" },
+        "referralCode": { "type": "string" },
+        "isAdmin": { "type": "boolean" },
+        "isBanned": { "type": "boolean" },
+        "activeNodes": { "type": "array", "items": { "type": "string" } },
+        "avatar": { "type": "string" },
+        "referredBy": { "type": "string" },
+        "miningStartedAt": { "type": "string" },
+        "bonusStartDate": { "type": "string" },
+        "ipAddress": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Request": {
+      "title": "Request",
+      "description": "Deposit or Withdrawal request",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["Deposit", "Withdrawal"] },
+        "amount": { "type": "number" },
+        "fee": { "type": "number" },
+        "netAmount": { "type": "number" },
+        "user": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "date": { "type": "string", "format": "date-time" },
+        "address": { "type": "string" },
+        "method": { "type": "string" }
+      }
+    },
+    "SupportMessage": {
+      "title": "SupportMessage",
+      "description": "A message in a support chat",
+      "type": "object",
+      "properties": {
+        "userEmail": { "type": "string" },
+        "userName": { "type": "string" },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "sender": { "type": "string", "enum": ["user", "admin"] },
+        "isRead": { "type": "boolean" }
+      }
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "Collection of user document where doc ID is user email"
+    },
+    "requests": {
+      "schema": "Request",
+      "description": "Global collection of deposit and withdrawal requests"
+    },
+    "support_messages": {
+      "schema": "SupportMessage",
+      "description": "Global collection of support messages"
+    }
+  }
+}

@@ -5,6 +5,7 @@ import { cn } from '../lib/utils';
 import { type User, type Transaction, type SupportMessage, DUMMY_USER, MINING_PLANS } from '../constants';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import { Line } from 'react-chartjs-2';
+import { auth, db, doc, collection, onSnapshot, updateDoc, deleteDoc, query, OperationType, handleFirestoreError, addDoc, getDoc, getDocs } from '../lib/firebase';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
@@ -32,30 +33,29 @@ export const Admin = ({ currentUser, onUpdateUser }: AdminProps) => {
   };
 
   useEffect(() => {
-    const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
-    // Ensure unique users by filtering out any that match the DUMMY_USER email
-    const uniqueSavedUsers = savedUsers.filter((u: User) => u.email !== DUMMY_USER.email);
-    setUsers([DUMMY_USER, ...uniqueSavedUsers]);
+    // Listen to all users
+    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+      const allUsers = snapshot.docs.map(doc => doc.data() as User);
+      setUsers(allUsers);
+    });
 
-    // Load support messages
-    const savedMessages = localStorage.getItem('lumix_support_messages');
-    if (savedMessages) {
-      setSupportMessages(JSON.parse(savedMessages));
-    }
+    // Listen to all support messages
+    const unsubscribeMessages = onSnapshot(collection(db, 'support_messages'), (snapshot) => {
+      const allMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SupportMessage));
+      setSupportMessages(allMessages);
+    });
 
-    // Load requests
-    const savedRequests = JSON.parse(localStorage.getItem('lumix_requests') || '[]');
-    if (savedRequests.length === 0) {
-      // Add some sample requests if none exist
-      const initialRequests = [
-        { id: 'LMX-1001', type: 'Deposit', amount: 250, user: 'John Doe', userEmail: 'john@example.com', status: 'pending', date: new Date().toISOString() },
-        { id: 'LMX-1002', type: 'Withdrawal', amount: 120, user: 'Jane Smith', userEmail: 'jane@example.com', status: 'pending', date: new Date().toISOString() },
-      ];
-      setRequests(initialRequests);
-      localStorage.setItem('lumix_requests', JSON.stringify(initialRequests));
-    } else {
-      setRequests(savedRequests);
-    }
+    // Listen to all requests
+    const unsubscribeRequests = onSnapshot(collection(db, 'requests'), (snapshot) => {
+      const allRequests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setRequests(allRequests);
+    });
+
+    return () => {
+      unsubscribeUsers();
+      unsubscribeMessages();
+      unsubscribeRequests();
+    };
   }, []);
 
   useEffect(() => {
@@ -64,109 +64,66 @@ export const Admin = ({ currentUser, onUpdateUser }: AdminProps) => {
     }
   }, [selectedUserChat, supportMessages]);
 
-  const handleReply = (userEmail: string, userName: string) => {
+  const handleReply = async (userEmail: string, userName: string) => {
     if (!replyInput.trim()) return;
     
-    const newMessage: SupportMessage = {
-      id: Math.random().toString(36).substr(2, 9),
+    const newMessage = {
       userEmail,
       userName,
       content: replyInput,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toISOString(),
       sender: 'admin',
       isRead: true
     };
 
-    const updatedMessages = [...supportMessages, newMessage];
-    setSupportMessages(updatedMessages);
-    localStorage.setItem('lumix_support_messages', JSON.stringify(updatedMessages));
-    setReplyInput('');
+    try {
+      await addDoc(collection(db, 'support_messages'), newMessage);
+      setReplyInput('');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'support_messages');
+    }
   };
 
-  const markChatAsRead = (userEmail: string) => {
-    const updatedMessages = supportMessages.map(m => 
-      m.userEmail === userEmail && m.sender === 'user' ? { ...m, isRead: true } : m
-    );
-    setSupportMessages(updatedMessages);
-    localStorage.setItem('lumix_support_messages', JSON.stringify(updatedMessages));
+  const markChatAsRead = async (userEmail: string) => {
+    const unreadMessages = supportMessages.filter(m => m.userEmail === userEmail && m.sender === 'user' && !m.isRead);
+    for (const msg of unreadMessages) {
+      try {
+        await updateDoc(doc(db, 'support_messages', (msg as any).id), { isRead: true });
+      } catch (error) {
+        console.error("Error marking message as read", error);
+      }
+    }
   };
 
-  const handleRequest = (id: string, action: 'approved' | 'rejected') => {
-    const updatedRequests = requests.map(req => {
-      if (req.id === id) {
-        if (req.status !== 'pending') return req; // Already processed
+  const handleRequest = async (id: string, action: 'approved' | 'rejected') => {
+    const req = requests.find(r => r.id === id);
+    if (!req || req.status !== 'pending') return;
 
-        if (action === 'approved') {
-          // Update user balance
-          const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
-          const updatedUsers = savedUsers.map((u: User) => {
-            if (u.email === req.userEmail) {
-              const amount = parseFloat(req.amount);
-              if (req.type === 'Deposit') {
-                return { ...u, balance: (u.balance || 0) + amount };
-              }
-            }
-            return u;
-          });
-          
-          localStorage.setItem('lumix_users', JSON.stringify(updatedUsers));
-          
-          // Also update current view users
-          setUsers(prev => prev.map(u => {
-            if (u.email === req.userEmail) {
-              const amount = parseFloat(req.amount);
-              if (req.type === 'Deposit') {
-                return { ...u, balance: (u.balance || 0) + amount };
-              }
-            }
-            return u;
-          }));
-
-          // If the admin themselves is the user:
-          const currentUserStr = localStorage.getItem('lumix_current_user');
-          if (currentUserStr) {
-            const currentUser = JSON.parse(currentUserStr);
-            if (currentUser.email === req.userEmail) {
-              const amount = parseFloat(req.amount);
-              if (req.type === 'Deposit') {
-                localStorage.setItem('lumix_current_user', JSON.stringify({ ...currentUser, balance: (currentUser.balance || 0) + amount }));
-              }
-            }
-          }
-        } else if (action === 'rejected' && req.type === 'Withdrawal') {
-          // If withdrawal is rejected, return the funds to the user's profit balance
-          const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
+    try {
+      if (action === 'approved') {
+        const userRef = doc(db, 'users', req.userEmail);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const userData = userSnap.data() as User;
           const amount = parseFloat(req.amount);
-          const updatedUsers = savedUsers.map((u: User) => {
-            if (u.email === req.userEmail) {
-              return { ...u, profit: (u.profit || 0) + amount };
-            }
-            return u;
-          });
-          localStorage.setItem('lumix_users', JSON.stringify(updatedUsers));
-          
-          setUsers(prev => prev.map(u => {
-            if (u.email === req.userEmail) {
-              return { ...u, profit: (u.profit || 0) + amount };
-            }
-            return u;
-          }));
-
-          const currentUserStr = localStorage.getItem('lumix_current_user');
-          if (currentUserStr) {
-            const currentUser = JSON.parse(currentUserStr);
-            if (currentUser.email === req.userEmail) {
-              localStorage.setItem('lumix_current_user', JSON.stringify({ ...currentUser, profit: (currentUser.profit || 0) + amount }));
-            }
+          if (req.type === 'Deposit') {
+            await updateDoc(userRef, { balance: (userData.balance || 0) + amount });
           }
         }
-        return { ...req, status: action };
+      } else if (action === 'rejected' && req.type === 'Withdrawal') {
+        const userRef = doc(db, 'users', req.userEmail);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const userData = userSnap.data() as User;
+          const amount = parseFloat(req.amount);
+          await updateDoc(userRef, { profit: (userData.profit || 0) + amount });
+        }
       }
-      return req;
-    });
-
-    setRequests(updatedRequests);
-    localStorage.setItem('lumix_requests', JSON.stringify(updatedRequests));
+      
+      await updateDoc(doc(db, 'requests', id), { status: action });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `requests/${id}`);
+    }
   };
 
   const statsData = {
@@ -183,39 +140,29 @@ export const Admin = ({ currentUser, onUpdateUser }: AdminProps) => {
     ],
   };
 
-  const deleteUser = (email: string) => {
+  const deleteUser = async (email: string) => {
     if (window.confirm(`Are you sure you want to permanently delete user ${email}?`)) {
-      const updatedUsers = users.filter(u => u.email !== email);
-      setUsers(updatedUsers);
-      
-      // Persist to localStorage
-      const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
-      const newSavedUsers = savedUsers.filter((u: User) => u.email !== email);
-      localStorage.setItem('lumix_users', JSON.stringify(newSavedUsers));
+      try {
+        await deleteDoc(doc(db, 'users', email));
+        alert("User deleted successfully.");
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `users/${email}`);
+      }
     }
   };
 
-  const toggleBan = (email: string) => {
-    const updatedUsers = users.map(u => 
-      u.email === email ? { ...u, isBanned: !u.isBanned } : u
-    );
-    setUsers(updatedUsers);
-    
-    // Persist to localStorage
-    const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
-    const newSavedUsers = savedUsers.map((u: User) => 
-      u.email === email ? { ...u, isBanned: !u.isBanned } : u
-    );
-    localStorage.setItem('lumix_users', JSON.stringify(newSavedUsers));
+  const toggleBan = async (email: string) => {
+    const userToToggle = users.find(u => u.email === email);
+    if (!userToToggle) return;
 
-    // If we're banning the current user, they'll be kicked out on refresh or next action
-    const currentUser = JSON.parse(localStorage.getItem('lumix_current_user') || '{}');
-    if (currentUser.email === email) {
-      localStorage.setItem('lumix_current_user', JSON.stringify({ ...currentUser, isBanned: !currentUser.isBanned }));
+    try {
+      await updateDoc(doc(db, 'users', email), { isBanned: !userToToggle.isBanned });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${email}`);
     }
   };
 
-  const handleAdjustBalance = () => {
+  const handleAdjustBalance = async () => {
     if (!adjustEmail || !adjustAmount) {
       alert("Please enter both email and amount.");
       return;
@@ -226,60 +173,28 @@ export const Admin = ({ currentUser, onUpdateUser }: AdminProps) => {
       return;
     }
 
-    const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
-    const userToAdjust = savedUsers.find((u: User) => u.email === adjustEmail) || (adjustEmail === DUMMY_USER.email ? DUMMY_USER : null);
-
-    if (!userToAdjust) {
-      alert("User not found! Please check the email/ID.");
-      return;
-    }
-
-    const updatedUsers = savedUsers.map((u: User) => {
-      if (u.email === adjustEmail) {
-        const currentBalance = u.balance || 0;
-        const newBalance = adjustType === 'add' ? currentBalance + amount : currentBalance - amount;
-        return { ...u, balance: Math.max(0, newBalance) };
+    try {
+      const userRef = doc(db, 'users', adjustEmail);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        alert("User not found!");
+        return;
       }
-      return u;
-    });
 
-    // Special case for DUMMY_USER if it's not in localStorage yet but we're editing it
-    if (adjustEmail === DUMMY_USER.email && !savedUsers.find((u: User) => u.email === DUMMY_USER.email)) {
-      const currentBalance = DUMMY_USER.balance || 0;
+      const userData = userSnap.data() as User;
+      const currentBalance = userData.balance || 0;
       const newBalance = adjustType === 'add' ? currentBalance + amount : currentBalance - amount;
-      updatedUsers.push({ ...DUMMY_USER, balance: Math.max(0, newBalance) });
+      
+      await updateDoc(userRef, { balance: Math.max(0, newBalance) });
+      alert(`Successfully ${adjustType === 'add' ? 'added' : 'subtracted'} $${amount} ${adjustType === 'add' ? 'to' : 'from'} ${adjustEmail}`);
+      setAdjustAmount('');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${adjustEmail}`);
     }
-
-    localStorage.setItem('lumix_users', JSON.stringify(updatedUsers));
-    
-    // Update local UI state
-    setUsers(prev => prev.map(u => {
-      if (u.email === adjustEmail) {
-        const currentBalance = u.balance || 0;
-        const newBalance = adjustType === 'add' ? currentBalance + amount : currentBalance - amount;
-        return { ...u, balance: Math.max(0, newBalance) };
-      }
-      return u;
-    }));
-
-    // Update current user if affected
-    const currentUserStr = localStorage.getItem('lumix_current_user');
-    if (currentUserStr) {
-      const currentUser = JSON.parse(currentUserStr);
-      if (currentUser.email === adjustEmail) {
-        const currentBalance = currentUser.balance || 0;
-        const newBalance = adjustType === 'add' ? currentBalance + amount : currentBalance - amount;
-        localStorage.setItem('lumix_current_user', JSON.stringify({ ...currentUser, balance: Math.max(0, newBalance) }));
-      }
-    }
-
-    alert(`Successfully ${adjustType === 'add' ? 'added' : 'subtracted'} $${amount} ${adjustType === 'add' ? 'to' : 'from'} ${adjustEmail}`);
-    setAdjustAmount('');
   };
 
-  const toggleUserMining = (email: string) => {
-    const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
-    const userToStop = savedUsers.find((u: User) => u.email === email);
+  const toggleUserMining = async (email: string) => {
+    const userToStop = users.find((u: User) => u.email === email);
     
     if (!userToStop || (userToStop.activeNodes || []).length === 0) {
       alert("This user has no active mining nodes.");
@@ -290,37 +205,20 @@ export const Admin = ({ currentUser, onUpdateUser }: AdminProps) => {
       return;
     }
 
-    const updatedUsers = savedUsers.map((u: User) => {
-      if (u.email === email) {
-        const investment = Number(u.miningBalance || 0);
-        const commission = investment * 0.03;
-        return {
-          ...u,
-          balance: Number(u.balance || 0) + investment,
-          profit: Number(u.profit || 0) + commission,
-          miningBalance: 0,
-          activeNodes: []
-        };
-      }
-      return u;
-    });
-
-    localStorage.setItem('lumix_users', JSON.stringify(updatedUsers));
-    const changedUser = updatedUsers.find((u: User) => u.email === email);
-    
-    setUsers(prev => prev.map(u => {
-      if (u.email === email && changedUser) {
-        return changedUser;
-      }
-      return u;
-    }));
-
-    // Update current user if affected
-    if (currentUser.email === email && changedUser) {
-      onUpdateUser(changedUser);
+    try {
+      const investment = Number(userToStop.miningBalance || 0);
+      const commission = (investment * 3) / 100;
+      
+      await updateDoc(doc(db, 'users', email), {
+        balance: Number(userToStop.balance || 0) + investment,
+        profit: Number(userToStop.profit || 0) + commission,
+        miningBalance: 0,
+        activeNodes: []
+      });
+      alert(`Successfully terminated mining session for ${email}. $${commission.toFixed(2)} commission awarded.`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${email}`);
     }
-
-    alert(`Successfully terminated mining session for ${email}. $${(userToStop.miningBalance * 0.03).toFixed(2)} commission awarded.`);
   };
 
   const filteredUsers = users.filter(u => 
@@ -328,14 +226,14 @@ export const Admin = ({ currentUser, onUpdateUser }: AdminProps) => {
     u.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleGlobalNodeToggle = (planId: string, turnOff: boolean) => {
+  const handleGlobalNodeToggle = async (planId: string, turnOff: boolean) => {
     if (!turnOff) {
       alert("Mass activation is not currently supported via Global Toggle. Users must deploy nodes individually.");
       return;
     }
 
-    const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
-    const affectedCount = savedUsers.filter((u: User) => (u.activeNodes || []).includes(planId)).length;
+    const affectedUsers = users.filter((u: User) => (u.activeNodes || []).includes(planId));
+    const affectedCount = affectedUsers.length;
 
     if (affectedCount === 0) {
       alert(`No active "${planId}" nodes found.`);
@@ -346,34 +244,22 @@ export const Admin = ({ currentUser, onUpdateUser }: AdminProps) => {
       return;
     }
 
-    let actualAffectedCount = 0;
-    
-    const updatedUsers = savedUsers.map((u: User) => {
-      if ((u.activeNodes || []).includes(planId)) {
-        actualAffectedCount++;
+    try {
+      for (const u of affectedUsers) {
         const investment = Number(u.miningBalance || 0);
         const commission = (investment * 3) / 100;
-        return {
-          ...u,
+        await updateDoc(doc(db, 'users', u.email), {
           balance: Number(u.balance || 0) + investment,
           profit: Number(u.profit || 0) + commission,
           miningBalance: 0,
           activeNodes: (u.activeNodes || []).filter(id => id !== planId)
-        };
+        });
       }
-      return u;
-    });
-
-    localStorage.setItem('lumix_users', JSON.stringify(updatedUsers));
-    setUsers(updatedUsers); // Update local state
-    
-    // Update admin if they were affected
-    const updatedMe = updatedUsers.find((u: User) => u.email === currentUser.email);
-    if (updatedMe) {
-      onUpdateUser(updatedMe);
+      alert(`SUCCESS: Global shutdown complete. ${affectedCount} users were affected and compensated with 3% bonus commission.`);
+    } catch (error) {
+      console.error("Error in global shutdown", error);
+      alert("An error occurred during global shutdown. Some users may not have been updated.");
     }
-
-    alert(`SUCCESS: Global shutdown complete. ${actualAffectedCount} users were affected and compensated with 3% bonus commission.`);
   };
 
   const getMiningStats = (planId: string) => {
@@ -492,7 +378,10 @@ export const Admin = ({ currentUser, onUpdateUser }: AdminProps) => {
                   </div>
                   <div>
                     <h4 className="font-bold text-sm">{user.name}</h4>
-                    <p className="text-[10px] text-gray-500 font-mono">{user.email}</p>
+                    <div className="flex flex-col">
+                      <p className="text-[10px] text-gray-500 font-mono">{user.email}</p>
+                      <p className="text-[9px] text-primary font-mono font-bold leading-tight mt-0.5">IP: {user.ipAddress || 'Not Tracked'}</p>
+                    </div>
                     <div className="flex gap-2 mt-1">
                       {user.isAdmin && <span className="text-[8px] bg-red-500/10 text-red-500 px-1.5 py-0.5 rounded-md font-black uppercase border border-red-500/20">Admin</span>}
                       {user.isBanned && <span className="text-[8px] bg-gray-500/10 text-gray-400 px-1.5 py-0.5 rounded-md font-black uppercase border border-gray-500/20">Banned</span>}

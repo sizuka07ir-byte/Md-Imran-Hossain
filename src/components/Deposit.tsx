@@ -1,8 +1,9 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { Landmark, ArrowRight, Bitcoin, CircleDollarSign, History, Copy, Check, Upload, ArrowLeft, ShieldCheck, Filter, Calendar, X } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { cn } from '../lib/utils';
 import { RECENT_TRANSACTIONS, type User } from '../constants';
+import { db, collection, addDoc, query, where, onSnapshot, OperationType, handleFirestoreError } from '../lib/firebase';
 
 interface DepositProps {
   user: User;
@@ -49,17 +50,36 @@ export const Deposit = ({ user, onReturnToHome, onDepositSuccess }: DepositProps
     return result;
   };
 
-  const handleSubmit = () => {
+  const [userRequests, setUserRequests] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!user.email) return;
+    const q = query(collection(db, 'requests'), where('userEmail', '==', user.email));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const requests = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })).map((r: any) => ({
+        id: r.id,
+        type: r.type.toLowerCase() as 'deposit' | 'withdraw',
+        amount: r.amount,
+        status: r.status,
+        date: r.date.split('T')[0],
+        method: r.method || r.address || r.type
+      }));
+      setUserRequests(requests);
+    });
+    return () => unsubscribe();
+  }, [user.email]);
+
+  const handleSubmit = async () => {
     if (!screenshot) {
       alert("Please upload a screenshot of your transaction.");
       return;
     }
-    const newTxId = generateTxId();
-    setTxId(newTxId);
     
     // Create real request for admin
     const newRequest = {
-      id: newTxId,
       type: 'Deposit',
       amount: parseFloat(amount),
       user: user.name,
@@ -69,27 +89,19 @@ export const Deposit = ({ user, onReturnToHome, onDepositSuccess }: DepositProps
       method: selectedMethod
     };
 
-    const savedRequests = JSON.parse(localStorage.getItem('lumix_requests') || '[]');
-    localStorage.setItem('lumix_requests', JSON.stringify([...savedRequests, newRequest]));
-
-    if (onDepositSuccess) {
-      onDepositSuccess((parseFloat(amount) + 1).toFixed(2), newTxId);
+    try {
+      const docRef = await addDoc(collection(db, 'requests'), newRequest);
+      setTxId(docRef.id);
+      if (onDepositSuccess) {
+        onDepositSuccess((parseFloat(amount) + 1).toFixed(2), docRef.id);
+      }
+      setStep('success');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'requests');
     }
-    setStep('success');
   };
 
   const calculatedAmount = amount ? (parseFloat(amount) + 1).toFixed(2) : '0.00';
-
-  const userRequests = JSON.parse(localStorage.getItem('lumix_requests') || '[]')
-    .filter((r: any) => r.userEmail === user.email)
-    .map((r: any) => ({
-      id: r.id,
-      type: r.type.toLowerCase() as 'deposit' | 'withdraw',
-      amount: r.amount,
-      status: r.status,
-      date: r.date.split('T')[0],
-      method: r.method || r.address || r.type
-    }));
 
   const filteredHistory = [...RECENT_TRANSACTIONS, ...userRequests].filter(t => {
     // Type filter

@@ -1,0 +1,114 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isEmailVerified() { return request.auth.token.email_verified == true; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function isAdmin() { return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.token.email)) && get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.isAdmin == true; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // --- Entities ---
+
+    // 1. Users
+    match /users/{userEmail} {
+      // Allow read if you are the user or an admin
+      allow get: if isSignedIn() && (request.auth.token.email == userEmail || isAdmin());
+      // Allow list if you are an admin
+      allow list: if isAdmin();
+
+      function isValidUser(data) {
+        return data.keys().hasAll(['name', 'email', 'balance', 'miningBalance', 'profit', 'miningPower', 'referralCode', 'isAdmin', 'isBanned', 'activeNodes'])
+          && data.name is string && data.name.size() <= 100
+          && data.email is string && data.email == userEmail
+          && data.balance is number
+          && data.miningBalance is number
+          && data.profit is number
+          && data.miningPower is number
+          && data.referralCode is string && data.referralCode.size() <= 20
+          && data.isAdmin is bool
+          && data.isBanned is bool
+          && data.activeNodes is list
+          && (data.get('ipAddress', null) == null || data.ipAddress is string);
+      }
+
+      allow create: if isSignedIn() && isEmailVerified() && request.auth.token.email == userEmail && isValidUser(incoming())
+        && incoming().isAdmin == false; // Prevent self-elevating to admin
+
+      allow update: if isSignedIn() && (
+        // Admin can update anything except becoming not an admin (redundant safeguard)
+        (isAdmin() && isValidUser(incoming())) ||
+        // User can update their own data for specific actions
+        (request.auth.token.email == userEmail && (
+          // Action: Start Mining (transfers balance to miningBalance)
+          (incoming().diff(existing()).affectedKeys().hasOnly(['balance', 'miningBalance', 'activeNodes', 'miningStartedAt', 'bonusStartDate']) && isValidUser(incoming())) ||
+          // Action: Update avatar/profile (not used in all UI parts but good for future)
+          (incoming().diff(existing()).affectedKeys().hasOnly(['avatar', 'name']) && isValidUser(incoming()))
+        ))
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // 2. Requests (Deposits & Withdrawals)
+    match /requests/{requestId} {
+      allow get: if isSignedIn() && (request.auth.token.email == resource.data.userEmail || isAdmin());
+      allow list: if isSignedIn() && (isAdmin() || resource.data.userEmail == request.auth.token.email);
+
+      function isValidRequest(data) {
+        return data.keys().hasAll(['type', 'amount', 'user', 'userEmail', 'status', 'date'])
+          && data.type in ['Deposit', 'Withdrawal']
+          && data.amount is number && data.amount > 0
+          && data.user is string && data.user.size() <= 100
+          && data.userEmail is string && data.userEmail.size() <= 100
+          && data.status in ['pending', 'approved', 'rejected']
+          && data.date is string;
+      }
+
+      allow create: if isSignedIn() && isEmailVerified() && isValidRequest(incoming()) 
+        && incoming().userEmail == request.auth.token.email
+        && incoming().status == 'pending';
+
+      allow update: if isAdmin() && isValidRequest(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+
+      allow delete: if isAdmin();
+    }
+
+    // 3. Support Messages
+    match /support_messages/{messageId} {
+      allow get: if isSignedIn() && (request.auth.token.email == resource.data.userEmail || isAdmin());
+      allow list: if isSignedIn() && (isAdmin() || resource.data.userEmail == request.auth.token.email);
+
+      function isValidMessage(data) {
+        return data.keys().hasAll(['userEmail', 'userName', 'content', 'timestamp', 'sender', 'isRead'])
+          && data.userEmail is string
+          && data.userName is string
+          && data.content is string && data.content.size() <= 5000
+          && data.timestamp is string
+          && data.sender in ['user', 'admin']
+          && data.isRead is bool;
+      }
+
+      allow create: if isSignedIn() && isEmailVerified() && isValidMessage(incoming())
+        && (
+          (incoming().sender == 'user' && incoming().userEmail == request.auth.token.email) ||
+          (incoming().sender == 'admin' && isAdmin())
+        );
+
+      allow update: if isSignedIn() && (
+        (isAdmin() && isValidMessage(incoming())) ||
+        (request.auth.token.email == resource.data.userEmail && incoming().diff(existing()).affectedKeys().hasOnly(['isRead']))
+      );
+
+      allow delete: if isAdmin();
+    }
+  }
+}
