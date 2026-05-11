@@ -19,7 +19,7 @@ import { SupportChat } from './components/SupportChat';
 import { MyTeam } from './components/MyTeam';
 import { WelcomeBanner } from './components/WelcomeBanner';
 import { DUMMY_USER, DUMMY_NOTIFICATIONS, createNewUser, type User, type Notification, type SupportMessage, MINING_PLANS } from './constants';
-import { auth, db, onAuthStateChanged, doc, onSnapshot, setDoc, getDoc, updateDoc, OperationType, handleFirestoreError, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, query, collection, where, addDoc, getDocs } from './lib/firebase';
+import { auth, db, onAuthStateChanged, doc, onSnapshot, setDoc, getDoc, updateDoc, OperationType, handleFirestoreError, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, query, collection, where, addDoc, getDocs, signInWithGoogle } from './lib/firebase';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -125,6 +125,40 @@ export default function App() {
   const handleLogin = async (name: string, email: string, isLogin: boolean, referralCode?: string, userPassword?: string) => {
     setIsLoading(true);
     try {
+      if (userPassword === 'GOOGLE') {
+        const result = await signInWithGoogle();
+        if (result && result.email) {
+          // Check if user document exists, if not create it
+          const userSnap = await getDoc(doc(db, 'users', result.email));
+          if (!userSnap.exists()) {
+            let ipAddress = 'Unknown';
+            try {
+              const response = await fetch('https://api.ipify.org?format=json');
+              const data = await response.json();
+              ipAddress = data.ip;
+            } catch (e) {
+              console.error("Failed to fetch IP address", e);
+            }
+
+            const newUser: User = {
+              ...createNewUser(result.displayName || 'User', result.email),
+              referredBy: referralCode || '',
+              ipAddress
+            };
+            await setDoc(doc(db, 'users', result.email), newUser);
+            setShowWelcomeBanner(true);
+            addNotification({
+              title: '🎊 Welcome to CRYPTOMAX',
+              message: `Your account has been created via Google. Welcome to the elite digital mining ecosystem!`,
+              type: 'system'
+            });
+          }
+        } else {
+          throw new Error("Unable to get email from Google account.");
+        }
+        return;
+      }
+
       const authPassword = userPassword || 'DummyPassword123!';
       if (isLogin) {
         await signInWithEmailAndPassword(auth, email, authPassword);
@@ -154,14 +188,21 @@ export default function App() {
         });
       }
     } catch (error: any) {
-      if (error.code === 'auth/user-not-found') {
-        alert("Account not found. Please register.");
+      console.error("Login/Register error:", error);
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+        if (isLogin) {
+          alert("Invalid email or password. If you don't have an account, please click the Register tab to create one.");
+        } else {
+          alert("Registration failed: " + error.message);
+        }
       } else if (error.code === 'auth/email-already-in-use') {
-        alert("Email already registered. Please login.");
-      } else if (error.code === 'auth/wrong-password') {
-        alert("Incorrect password.");
+        alert("This email is already registered. Please go to the Login tab to sign in.");
+      } else if (error.code === 'auth/operation-not-allowed') {
+        alert("Authentication method not enabled. Please ensure Email/Password and Google are enabled in Firebase Console.");
+      } else if (error.code === 'auth/weak-password') {
+        alert("Password is too weak. Please use a stronger password.");
       } else {
-        alert("Authentication error: " + error.message);
+        alert("Error: " + (error.message || "An unexpected error occurred."));
       }
     } finally {
       setIsLoading(false);

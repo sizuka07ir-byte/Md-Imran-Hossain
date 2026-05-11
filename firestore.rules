@@ -39,7 +39,7 @@ service cloud.firestore {
           && (data.get('ipAddress', null) == null || data.ipAddress is string);
       }
 
-      allow create: if isSignedIn() && isEmailVerified() && request.auth.token.email == userEmail && isValidUser(incoming())
+      allow create: if isSignedIn() && request.auth.token.email == userEmail && isValidUser(incoming())
         && incoming().isAdmin == false; // Prevent self-elevating to admin
 
       allow update: if isSignedIn() && (
@@ -72,7 +72,7 @@ service cloud.firestore {
           && data.date is string;
       }
 
-      allow create: if isSignedIn() && isEmailVerified() && isValidRequest(incoming()) 
+      allow create: if isSignedIn() && isValidRequest(incoming()) 
         && incoming().userEmail == request.auth.token.email
         && incoming().status == 'pending';
 
@@ -97,7 +97,7 @@ service cloud.firestore {
           && data.isRead is bool;
       }
 
-      allow create: if isSignedIn() && isEmailVerified() && isValidMessage(incoming())
+      allow create: if isSignedIn() && isValidMessage(incoming())
         && (
           (incoming().sender == 'user' && incoming().userEmail == request.auth.token.email) ||
           (incoming().sender == 'admin' && isAdmin())
