@@ -19,7 +19,7 @@ import { SupportChat } from './components/SupportChat';
 import { MyTeam } from './components/MyTeam';
 import { WelcomeBanner } from './components/WelcomeBanner';
 import { DUMMY_USER, DUMMY_NOTIFICATIONS, createNewUser, type User, type Notification, type SupportMessage, MINING_PLANS } from './constants';
-import { auth, db, onAuthStateChanged, doc, onSnapshot, setDoc, getDoc, updateDoc, OperationType, handleFirestoreError, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, query, collection, where, addDoc } from './lib/firebase';
+import { auth, db, onAuthStateChanged, doc, onSnapshot, setDoc, getDoc, updateDoc, OperationType, handleFirestoreError, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, query, collection, where, addDoc, getDocs } from './lib/firebase';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -122,13 +122,14 @@ export default function App() {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
   };
 
-  const handleLogin = async (name: string, email: string, isLogin: boolean, referralCode?: string) => {
+  const handleLogin = async (name: string, email: string, isLogin: boolean, referralCode?: string, userPassword?: string) => {
     setIsLoading(true);
     try {
+      const authPassword = userPassword || 'DummyPassword123!';
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, 'DummyPassword123!'); // App currently doesn't ask for password in UI, using a dummy one for simplicity or we should update UI
+        await signInWithEmailAndPassword(auth, email, authPassword);
       } else {
-        await createUserWithEmailAndPassword(auth, email, 'DummyPassword123!');
+        await createUserWithEmailAndPassword(auth, email, authPassword);
         
         let ipAddress = 'Unknown';
         try {
@@ -246,43 +247,39 @@ export default function App() {
             }
 
             // Global Shutdown when admin turns off a node
-            const savedUsersStr = localStorage.getItem('lumix_users') || '[]';
-            const savedUsers: User[] = JSON.parse(savedUsersStr);
-            
-            let affectedCount = 0;
-            const updatedUsers = savedUsers.map(u => {
-              const nodeIds = u.activeNodes || [];
-              if (nodeIds.includes(planId)) {
-                affectedCount++;
-                const investment = Number(u.miningBalance || 0);
-                const commission = (investment * 3) / 100; 
+            const globalShutdown = async () => {
+              try {
+                const usersSnap = await getDocs(collection(db, 'users'));
+                let affectedCount = 0;
                 
-                return {
-                  ...u,
-                  balance: Number(u.balance || 0) + investment,
-                  profit: Number(u.profit || 0) + commission,
-                  miningBalance: 0,
-                  activeNodes: nodeIds.filter(id => id !== planId)
-                };
+                for (const docSnap of usersSnap.docs) {
+                  const u = docSnap.data() as User;
+                  const nodeIds = u.activeNodes || [];
+                  if (nodeIds.includes(planId)) {
+                    affectedCount++;
+                    const investment = Number(u.miningBalance || 0);
+                    const commission = (investment * 3) / 100; 
+                    
+                    await updateDoc(docSnap.ref, {
+                      balance: Number(u.balance || 0) + investment,
+                      profit: Number(u.profit || 0) + commission,
+                      miningBalance: 0,
+                      activeNodes: nodeIds.filter(id => id !== planId)
+                    });
+                  }
+                }
+
+                addNotification({
+                  title: 'Mining Node Offline ⚡',
+                  message: `System node ${plan?.name} has been deactivated. ${affectedCount} users received capital back + 3% commission.`,
+                  type: 'mining'
+                });
+              } catch (error) {
+                console.error("Global shutdown error", error);
               }
-              return u;
-            });
-
-            localStorage.setItem('lumix_users', JSON.stringify(updatedUsers));
+            };
             
-            // Update current user state
-            const updatedCurrentUser = updatedUsers.find(u => u.email === user.email);
-            if (updatedCurrentUser) {
-              setUser(updatedCurrentUser);
-              localStorage.setItem('lumix_current_user', JSON.stringify(updatedCurrentUser));
-            }
-
-            addNotification({
-              title: 'Mining Node Offline ⚡',
-              message: `System node ${plan?.name} has been deactivated. ${affectedCount} users received capital back + 3% commission.`,
-              type: 'mining'
-            });
-            
+            globalShutdown();
             return true;
           }
         }}
@@ -380,6 +377,7 @@ export default function App() {
       </header>
 
       <NotificationCenter 
+        user={user}
         isOpen={isNotificationsOpen} 
         onClose={() => setIsNotificationsOpen(false)}
         notifications={notifications}

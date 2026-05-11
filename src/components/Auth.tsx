@@ -4,7 +4,7 @@ import { Mail, Lock, User, ArrowRight, ShieldCheck, Share2 } from 'lucide-react'
 import { cn } from '../lib/utils';
 
 interface AuthProps {
-  onLogin: (name: string, email: string, isLogin: boolean, referralCode?: string) => void;
+  onLogin: (name: string, email: string, isLogin: boolean, referralCode?: string, password?: string) => void;
 }
 
 export const Auth = ({ onLogin }: AuthProps) => {
@@ -61,7 +61,7 @@ export const Auth = ({ onLogin }: AuthProps) => {
               alert("Please fill in all fields.");
               return;
             }
-            onLogin(name, email, isLogin, referralCode); 
+            onLogin(name, email, isLogin, referralCode, password); 
           }}>
             {!isLogin && (
               <div className="relative">

@@ -45,8 +45,8 @@ export const Withdraw = ({ user }: WithdrawProps) => {
 
   const handleWithdraw = async () => {
     const val = parseFloat(amount);
-    if (!amount || isNaN(val) || val < 7) {
-      alert("Minimum withdrawal is $7.00");
+    if (!amount || isNaN(val) || val < 5) {
+      alert("Minimum withdrawal is $5.00");
       return;
     }
     if (!address.trim()) {
@@ -145,7 +145,7 @@ export const Withdraw = ({ user }: WithdrawProps) => {
           <div className="space-y-2">
             <div className="flex justify-between items-center px-1">
               <label className="text-sm font-medium text-gray-400">Withdrawal Amount ($)</label>
-              <span className="text-[10px] font-black text-orange-500 uppercase">Min: $7.00</span>
+              <span className="text-[10px] font-black text-orange-500 uppercase">Min: $5.00</span>
             </div>
             <div className="relative group">
               <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-primary transition-colors" size={18} />
@@ -201,7 +201,7 @@ export const Withdraw = ({ user }: WithdrawProps) => {
 
         <button 
           onClick={handleWithdraw}
-          disabled={isSubmitting || !amount || parseFloat(amount) < 7 || !address}
+          disabled={isSubmitting || !amount || parseFloat(amount) < 5 || !address}
           className="w-full bg-primary disabled:opacity-50 disabled:grayscale hover:bg-primary/90 text-black font-bold py-4 rounded-2xl transition-all glow-green active:scale-95 flex items-center justify-center gap-2"
         >
           {isSubmitting ? (

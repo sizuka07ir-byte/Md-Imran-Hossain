@@ -3,6 +3,7 @@ import { Users, Copy, Check, Share2, Search, UserPlus, ArrowLeft } from 'lucide-
 import { useState, useEffect } from 'react';
 import { type User } from '../constants';
 import { cn } from '../lib/utils';
+import { db, collection, query, where, onSnapshot } from '../lib/firebase';
 
 interface MyTeamProps {
   user: User;
@@ -17,37 +18,42 @@ export function MyTeam({ user, onBack }: MyTeamProps) {
   const [leaderboard, setLeaderboard] = useState<{ name: string; avatar?: string; count: number; email: string }[]>([]);
 
   useEffect(() => {
-    const savedUsers = JSON.parse(localStorage.getItem('lumix_users') || '[]');
-    
-    // Fetch my referrals
-    const myReferrals = savedUsers.filter((u: any) => u.referredBy === user.referralCode);
-    setTeamMembers(myReferrals);
+    // Listen to all users for team and leaderboard
+    const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
+      const allUsers = snapshot.docs.map(doc => doc.data() as User);
+      
+      // Fetch my referrals
+      const myReferrals = allUsers.filter((u: User) => u.referredBy === user.referralCode);
+      setTeamMembers(myReferrals);
 
-    // Calculate Leaderboard
-    const referralCounts: Record<string, { name: string; avatar?: string; count: number; email: string }> = {};
-    
-    savedUsers.forEach((u: User) => {
-      if (u.referredBy) {
-        const referrer = savedUsers.find((ref: User) => ref.referralCode === u.referredBy);
-        if (referrer) {
-          if (!referralCounts[referrer.email]) {
-            referralCounts[referrer.email] = { 
-              name: referrer.name, 
-              avatar: referrer.avatar, 
-              count: 0,
-              email: referrer.email 
-            };
+      // Calculate Leaderboard
+      const referralCounts: Record<string, { name: string; avatar?: string; count: number; email: string }> = {};
+      
+      allUsers.forEach((u: User) => {
+        if (u.referredBy) {
+          const referrer = allUsers.find((ref: User) => ref.referralCode === u.referredBy);
+          if (referrer) {
+            if (!referralCounts[referrer.email]) {
+              referralCounts[referrer.email] = { 
+                name: referrer.name, 
+                avatar: referrer.avatar, 
+                count: 0,
+                email: referrer.email 
+              };
+            }
+            referralCounts[referrer.email].count++;
           }
-          referralCounts[referrer.email].count++;
         }
-      }
+      });
+
+      const sortedLeaderboard = Object.values(referralCounts)
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+      
+      setLeaderboard(sortedLeaderboard);
     });
 
-    const sortedLeaderboard = Object.values(referralCounts)
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-    
-    setLeaderboard(sortedLeaderboard);
+    return () => unsubscribe();
   }, [user.referralCode]);
 
   const referralLink = `${window.location.origin}/signup?ref=${user.referralCode}`;

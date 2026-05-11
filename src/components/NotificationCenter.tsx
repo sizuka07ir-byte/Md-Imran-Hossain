@@ -1,28 +1,32 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { Bell, X, CheckCircle2, Clock, DollarSign, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
-import { Notification } from '../constants';
+import { Notification, User } from '../constants';
 import { cn } from '../lib/utils';
 import { useState, useEffect } from 'react';
+import { db, collection, query, where, onSnapshot } from '../lib/firebase';
 
 interface NotificationCenterProps {
+  user: User;
   notifications: Notification[];
   isOpen: boolean;
   onClose: () => void;
   onMarkAsRead: (id: string) => void;
 }
 
-export const NotificationCenter = ({ notifications, isOpen, onClose, onMarkAsRead }: NotificationCenterProps) => {
+export const NotificationCenter = ({ user, notifications, isOpen, onClose, onMarkAsRead }: NotificationCenterProps) => {
   const [activeTab, setActiveTab] = useState<'alerts' | 'deposits' | 'withdrawals'>('alerts');
   const [transactions, setTransactions] = useState<any[]>([]);
 
   useEffect(() => {
-    if (isOpen) {
-      const savedRequests = JSON.parse(localStorage.getItem('lumix_requests') || '[]');
-      const currentUser = JSON.parse(localStorage.getItem('lumix_current_user') || '{}');
-      const userTransactions = savedRequests.filter((req: any) => req.userEmail === currentUser.email);
-      setTransactions(userTransactions);
+    if (isOpen && user.email) {
+      const q = query(collection(db, 'requests'), where('userEmail', '==', user.email));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const userTransactions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setTransactions(userTransactions);
+      });
+      return () => unsubscribe();
     }
-  }, [isOpen]);
+  }, [isOpen, user.email]);
 
   const deposits = transactions.filter(t => t.type === 'Deposit');
   const withdrawals = transactions.filter(t => t.type === 'Withdrawal');
